@@ -8,6 +8,8 @@ supabase==2.3.4
 sqlalchemy==2.0.29
 asyncpg>=0.31.0
 
+httpx==0.25.2
+
 # Google APIs
 google-auth==2.28.1
 google-auth-oauthlib==1.2.0
