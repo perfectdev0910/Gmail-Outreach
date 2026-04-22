@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
 
+    service_account_json: str = Field(default="", alias="SERVICE_ACCOUNT_JSON")
+
+    # Sender Info (for email content)
+    sender_name: str = Field(default="Adam Wyrzycki", alias="SENDER_NAME")
+    sender_company: str = Field(default="software agency", alias="SENDER_COMPANY")
+    sender_location: str = Field(default="Warsaw, Poland", alias="SENDER_LOCATION")
+    sender_eu_team: str = Field(default="24 senior-level engineers in the EU", alias="SENDER_EU_TEAM")
+    sender_us_team: str = Field(default="10 collaborators in the US", alias="SENDER_US_TEAM")
+    sender_intro: str = Field(default="I manage an agency based in Warsaw, Poland", alias="SENDER_INTRO")
+    sender_us_role: str = Field(default="part-time", alias="SENDER_US_ROLE")
+    sender_role_focus: str = Field(default="client communication for one or two hours per day", alias="SENDER_ROLE_FOCUS")
+
     # Google OAuth2
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
