@@ -4,25 +4,25 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.database import db
 from app.services.worker import worker
+from pydantic import BaseModel
+
+class CampaignStartRequest(BaseModel):
+    spreadsheet_id: str
 
 router = APIRouter(prefix="/campaign", tags=["campaign"])
 
 
 @router.post("/start")
-async def start_campaign(spreadsheet_id: str):
-    """Start the email campaign.
-    
-    Args:
-        spreadsheet_id: Google Sheets ID containing leads
-    """
-    # Update campaign state
+async def start_campaign(data: CampaignStartRequest):
+    spreadsheet_id = data.spreadsheet_id
+
     db.update_campaign_state({"is_running": True, "is_paused": False})
-    
-    # Start worker
+
     success = worker.start(spreadsheet_id)
-    
+
     if success:
         return {"status": "started", "spreadsheet_id": spreadsheet_id}
+
     raise HTTPException(status_code=400, detail="Campaign already running")
 
 
