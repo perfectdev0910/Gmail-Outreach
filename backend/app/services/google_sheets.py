@@ -1,6 +1,7 @@
-"""Google Sheets service for lead management (Render-safe, production-ready)."""
+"""Google Sheets service for lead management (Render-safe + rate-limit safe)."""
 
 import json
+import time
 from typing import Any, Dict, List, Optional
 
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
@@ -14,27 +15,22 @@ settings = get_settings()
 
 
 # =========================
-# SAFE CREDENTIAL LOADER
+# SERVICE ACCOUNT LOADER
 # =========================
 
 def get_service_account_credentials():
-    """
-    Load Google Service Account from Render environment variable.
-
-    Expected:
-    SERVICE_ACCOUNT_JSON = full JSON string
-    """
+    """Load Google Service Account from Render env variable."""
 
     if not settings.service_account_json:
-        raise ValueError("Missing SERVICE_ACCOUNT_JSON in environment")
+        raise ValueError("Missing SERVICE_ACCOUNT_JSON")
 
     try:
-        service_account_info = json.loads(settings.service_account_json)
+        info = json.loads(settings.service_account_json)
     except json.JSONDecodeError as e:
-        raise ValueError("Invalid SERVICE_ACCOUNT_JSON format") from e
+        raise ValueError("Invalid SERVICE_ACCOUNT_JSON") from e
 
     return ServiceAccountCredentials.from_service_account_info(
-        service_account_info,
+        info,
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
 
@@ -44,16 +40,24 @@ def get_service_account_credentials():
 # =========================
 
 class GoogleSheetsService:
-    """Google Sheets API wrapper (service account based)."""
+    """
+    Production-safe Google Sheets client:
+    - caches reads (prevents 429)
+    - minimizes API calls
+    """
 
     def __init__(self, credentials: Optional[ServiceAccountCredentials] = None):
         self._credentials = credentials
         self._service: Optional[Resource] = None
         self._spreadsheet_id: Optional[str] = None
 
+        # 🔥 CACHE (IMPORTANT FIX FOR 429)
+        self._cache: Dict[str, Any] = {}
+        self._cache_time: float = 0
+        self._cache_ttl = 60  # seconds
+
     @property
     def service(self) -> Resource:
-        """Lazy init Google Sheets client."""
         if self._service is None:
             if self._credentials is None:
                 self._credentials = get_service_account_credentials()
@@ -67,17 +71,31 @@ class GoogleSheetsService:
 
         return self._service
 
-    # -------------------------
-    # CONFIG
-    # -------------------------
-    def set_spreadsheet_id(self, spreadsheet_id: str) -> None:
+    def set_spreadsheet_id(self, spreadsheet_id: str):
         self._spreadsheet_id = spreadsheet_id
 
-    # -------------------------
-    # READ LEADS
-    # -------------------------
+    # =========================
+    # CACHE WRAPPER
+    # =========================
+    def _get_cached(self, key: str):
+        if time.time() - self._cache_time < self._cache_ttl:
+            return self._cache.get(key)
+        return None
+
+    def _set_cache(self, key: str, value: Any):
+        self._cache[key] = value
+        self._cache_time = time.time()
+
+    # =========================
+    # READ LEADS (CACHED)
+    # =========================
     def get_leads(self, spreadsheet_id: str) -> List[Dict[str, Any]]:
         self.set_spreadsheet_id(spreadsheet_id)
+
+        cache_key = f"leads_{spreadsheet_id}"
+        cached = self._get_cached(cache_key)
+        if cached:
+            return cached
 
         try:
             result = (
@@ -94,7 +112,7 @@ class GoogleSheetsService:
             if not values or len(values) < 2:
                 return []
 
-            leads: List[Dict[str, Any]] = []
+            leads = []
 
             for row in values[1:]:
                 if not row:
@@ -110,15 +128,16 @@ class GoogleSheetsService:
                     "followup_stage": row[6] if len(row) > 6 else "none",
                 })
 
+            self._set_cache(cache_key, leads)
             return leads
 
-        except HttpError as error:
-            print(f"[Google Sheets] Read error: {error}")
+        except HttpError as e:
+            print("[Sheets ERROR]", e)
             return []
 
-    # -------------------------
-    # UPDATE CELL
-    # -------------------------
+    # =========================
+    # UPDATE LEAD
+    # =========================
     def update_lead(
         self,
         spreadsheet_id: str,
@@ -141,24 +160,25 @@ class GoogleSheetsService:
                 if field not in column_map:
                     continue
 
-                range_str = f"Sheet1!{column_map[field]}{row_number}"
-
                 self.service.spreadsheets().values().update(
                     spreadsheetId=spreadsheet_id,
-                    range=range_str,
+                    range=f"Sheet1!{column_map[field]}{row_number}",
                     valueInputOption="USER_ENTERED",
                     body={"values": [[str(value)]]},
                 ).execute()
 
+            # invalidate cache after update
+            self._cache.clear()
+
             return True
 
-        except HttpError as error:
-            print(f"[Google Sheets] Update error: {error}")
+        except HttpError as e:
+            print("[Sheets UPDATE ERROR]", e)
             return False
 
-    # -------------------------
+    # =========================
     # UPDATE BY EMAIL
-    # -------------------------
+    # =========================
     def update_lead_status(
         self,
         spreadsheet_id: str,
@@ -171,11 +191,11 @@ class GoogleSheetsService:
 
         for lead in leads:
             if lead.get("email") == email:
-                row_number = lead.get("no", 0) + 1
+                row = lead.get("no", 0) + 1
 
                 return self.update_lead(
                     spreadsheet_id,
-                    row_number,
+                    row,
                     {
                         "status": status,
                         "followup_stage": followup_stage,
@@ -185,9 +205,9 @@ class GoogleSheetsService:
 
         return False
 
-    # -------------------------
+    # =========================
     # MARK CONTACTED
-    # -------------------------
+    # =========================
     def mark_lead_contacted(
         self,
         spreadsheet_id: str,
@@ -199,11 +219,11 @@ class GoogleSheetsService:
 
         for lead in leads:
             if lead.get("email") == email:
-                row_number = lead.get("no", 0) + 1
+                row = lead.get("no", 0) + 1
 
                 return self.update_lead(
                     spreadsheet_id,
-                    row_number,
+                    row,
                     {
                         "status": "contacted",
                         "followup_stage": followup_stage,
@@ -219,8 +239,6 @@ class GoogleSheetsService:
 # =========================
 
 class LeadManager:
-    """Business logic layer for leads."""
-
     def __init__(self, sheets_service: Optional[GoogleSheetsService] = None):
         self.sheets = sheets_service or GoogleSheetsService()
 
@@ -228,20 +246,13 @@ class LeadManager:
         return self.sheets.get_leads(spreadsheet_id)
 
     def get_pending_leads(self, spreadsheet_id: str, followup_stage: str = "none"):
-        leads = self.sync_leads(spreadsheet_id)
-
         return [
-            l for l in leads
+            l for l in self.sync_leads(spreadsheet_id)
             if l.get("status") == "pending"
             and l.get("followup_stage") == followup_stage
         ]
 
-    def get_leads_for_followup(
-        self,
-        spreadsheet_id: str,
-        stage: str,
-        days_since_contact: int,
-    ):
+    def get_leads_for_followup(self, spreadsheet_id: str, stage: str, days_since_contact: int):
         leads = self.sync_leads(spreadsheet_id)
         cutoff = datetime.utcnow() - timedelta(days=days_since_contact)
 
@@ -274,5 +285,4 @@ class LeadManager:
         return self.sheets.mark_lead_contacted(spreadsheet_id, email, "followup2")
 
 
-# Singleton
 lead_manager = LeadManager()
