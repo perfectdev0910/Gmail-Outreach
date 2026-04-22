@@ -5,6 +5,7 @@ python-multipart==0.0.9
 
 # Database
 supabase==2.4.2
+gotrue==2.11.0
 sqlalchemy==2.0.29
 asyncpg==0.31.0
 
