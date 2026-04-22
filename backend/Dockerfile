@@ -1,35 +1,30 @@
 # Backend Dockerfile for Render deployment
 
+# Use Python 3.11 slim image
 FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-# System dependencies (add curl + build essentials for stability)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    curl \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Prevent Python buffering logs (VERY important on Render)
-ENV PYTHONUNBUFFERED=1
-
-# Copy requirements first (better caching)
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip tools (important for dependency resolution)
-RUN pip install --upgrade pip setuptools wheel
-
-# Install dependencies
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
+# Copy application code
 COPY . .
 
-# IMPORTANT: Render uses dynamic ports
-ENV PORT=8000
+# Create .env file if it doesn't exist
+RUN if [ ! -f .env ]; then cp .env.example .env; fi
 
+# Expose port
 EXPOSE 8000
 
-# Run with proper port binding
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
