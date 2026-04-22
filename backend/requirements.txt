@@ -22,8 +22,8 @@ pytz==2024.1
 httpx>=0.26.0,<0.28
 
 # Pydantic stack (IMPORTANT: do NOT pin pydantic-core)
-pydantic==2.6.4
-pydantic-settings==2.1.0
+pydantic>=2.10
+pydantic-settings>=2.2
 
 # Scheduler
 apscheduler==3.10.4
