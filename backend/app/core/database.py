@@ -11,7 +11,7 @@ settings = get_settings()
 
 
 # =========================
-# CLIENT
+# SUPABASE CLIENT
 # =========================
 
 def get_supabase_client() -> Client:
@@ -19,7 +19,7 @@ def get_supabase_client() -> Client:
 
 
 # =========================
-# DATABASE
+# DATABASE WRAPPER
 # =========================
 
 class Database:
@@ -91,7 +91,7 @@ class Database:
         return res.data[0] if res.data else {}
 
     # =========================
-    # COUNTERS (FIXED SAFE)
+    # COUNTERS (SAFE FIX)
     # =========================
 
     def increment_sent_count(self, account_id: str):
@@ -105,19 +105,19 @@ class Database:
             "last_sent_at": datetime.utcnow().isoformat(),
         }).eq("id", account_id).execute()
 
+    # ❌ FIX: avoid unsafe global UPDATE without WHERE crash
     def reset_hourly_counts(self):
-        # SAFE: no empty update
         self.supabase.table("gmail_accounts").update({
             "hourly_sent_count": 0
-        }).neq("id", "").execute()
+        }).eq("status", "active").execute()
 
     def reset_daily_counts(self):
         self.supabase.table("gmail_accounts").update({
             "daily_sent_count": 0
-        }).neq("id", "").execute()
+        }).eq("status", "active").execute()
 
     # =========================
-    # CAMPAIGN STATE
+    # CAMPAIGN STATE (FIXED MISSING METHOD)
     # =========================
 
     def get_campaign_state(self):
@@ -136,8 +136,27 @@ class Database:
         created = self.supabase.table("campaign_state").insert(default).execute()
         return created.data[0] if created.data else default
 
+    def update_campaign_state(self, updates: Dict[str, Any]):
+        """
+        FIX: This was missing → caused your crash in worker.py
+        """
+
+        state = self.get_campaign_state()
+
+        if not state or "id" not in state:
+            return {}
+
+        res = (
+            self.supabase.table("campaign_state")
+            .update(updates)
+            .eq("id", state["id"])
+            .execute()
+        )
+
+        return res.data[0] if res.data else {}
+
     # =========================
-    # EMAIL LOGS (FIXED KEY ISSUE)
+    # EMAIL LOGS (FIXED SCHEMA)
     # =========================
 
     def add_email_log(
@@ -152,13 +171,13 @@ class Database:
         message_id: str = "",
     ):
         """
-        FIX: DB column is `type`, NOT `log_type`
+        FIX: column name is `type` NOT `log_type`
         """
 
         data = {
             "lead_email": lead_email,
             "account_id": account_id,
-            "type": log_type,   # ✅ FIXED HERE
+            "type": log_type,   # IMPORTANT FIX
             "status": status,
             "openai_output": openai_output,
             "error_message": error_message,
@@ -208,5 +227,8 @@ class Database:
         return res.data[0] if res.data else None
 
 
-# Singleton
+# =========================
+# SINGLETON
+# =========================
+
 db = Database()
