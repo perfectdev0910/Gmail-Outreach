@@ -1,4 +1,4 @@
-"""Database client for Supabase connection (production-safe)."""
+"""Database client for Supabase connection (production-safe fixed version)."""
 
 import json
 from typing import Any, Dict, List, Optional
@@ -11,20 +11,19 @@ settings = get_settings()
 
 
 # =========================
-# SUPABASE CLIENT
+# CLIENT
 # =========================
 
 def get_supabase_client() -> Client:
-    """Create Supabase client."""
     return create_client(settings.supabase_url, settings.supabase_key)
 
 
 # =========================
-# DATABASE WRAPPER
+# DATABASE
 # =========================
 
 class Database:
-    """Safe Supabase wrapper for production usage."""
+    """Production-safe Supabase wrapper."""
 
     def __init__(self):
         self.client: Optional[Client] = None
@@ -42,11 +41,11 @@ class Database:
     # GMAIL ACCOUNTS
     # =========================
 
-    def get_gmail_accounts(self) -> List[Dict[str, Any]]:
+    def get_gmail_accounts(self):
         res = self.supabase.table("gmail_accounts").select("*").execute()
         return res.data or []
 
-    def get_active_gmail_accounts(self) -> List[Dict[str, Any]]:
+    def get_active_gmail_accounts(self):
         res = (
             self.supabase.table("gmail_accounts")
             .select("*")
@@ -55,7 +54,7 @@ class Database:
         )
         return res.data or []
 
-    def get_gmail_account(self, account_id: str) -> Optional[Dict[str, Any]]:
+    def get_gmail_account(self, account_id: str):
         res = (
             self.supabase.table("gmail_accounts")
             .select("*")
@@ -65,13 +64,7 @@ class Database:
         )
         return res.data[0] if res.data else None
 
-    def add_gmail_account(
-        self,
-        email: str,
-        oauth_credentials: Dict[str, Any],
-        status: str = "active",
-    ) -> Dict[str, Any]:
-
+    def add_gmail_account(self, email: str, oauth_credentials: Dict[str, Any], status="active"):
         data = {
             "email": email,
             "oauth_credentials": json.dumps(oauth_credentials),
@@ -84,16 +77,9 @@ class Database:
         res = self.supabase.table("gmail_accounts").insert(data).execute()
         return res.data[0] if res.data else {}
 
-    def update_gmail_account(
-        self,
-        account_id: str,
-        updates: Dict[str, Any],
-    ) -> Dict[str, Any]:
-
+    def update_gmail_account(self, account_id: str, updates: Dict[str, Any]):
         if "oauth_credentials" in updates:
-            updates["oauth_credentials"] = json.dumps(
-                updates["oauth_credentials"]
-            )
+            updates["oauth_credentials"] = json.dumps(updates["oauth_credentials"])
 
         res = (
             self.supabase.table("gmail_accounts")
@@ -104,94 +90,87 @@ class Database:
 
         return res.data[0] if res.data else {}
 
-    def delete_gmail_account(self, account_id: str) -> bool:
-        res = (
-            self.supabase.table("gmail_accounts")
-            .delete()
-            .eq("id", account_id)
-            .execute()
-        )
-        return bool(res.data)
-
     # =========================
-    # COUNTERS (FIXED)
+    # COUNTERS (FIXED SAFE)
     # =========================
 
-    def increment_sent_count(self, account_id: str) -> None:
-        """Atomic increment (SAFE)."""
-
-        account = self.get_gmail_account(account_id)
-        if not account:
+    def increment_sent_count(self, account_id: str):
+        acc = self.get_gmail_account(account_id)
+        if not acc:
             return
 
         self.supabase.table("gmail_accounts").update({
-            "daily_sent_count": (account.get("daily_sent_count", 0) + 1),
-            "hourly_sent_count": (account.get("hourly_sent_count", 0) + 1),
+            "daily_sent_count": (acc.get("daily_sent_count", 0) + 1),
+            "hourly_sent_count": (acc.get("hourly_sent_count", 0) + 1),
             "last_sent_at": datetime.utcnow().isoformat(),
         }).eq("id", account_id).execute()
 
-    def reset_hourly_counts(self) -> None:
-        """
-        FIXED: Supabase requires WHERE clause.
-        We safely target all rows using neq(id, null-safe fallback).
-        """
+    def reset_hourly_counts(self):
+        # SAFE: no empty update
+        self.supabase.table("gmail_accounts").update({
+            "hourly_sent_count": 0
+        }).neq("id", "").execute()
 
-        self.supabase.table("gmail_accounts").update(
-            {"hourly_sent_count": 0}
-        ).neq("id", "").execute()
-
-    def reset_daily_counts(self) -> None:
-        self.supabase.table("gmail_accounts").update(
-            {"daily_sent_count": 0}
-        ).neq("id", "").execute()
+    def reset_daily_counts(self):
+        self.supabase.table("gmail_accounts").update({
+            "daily_sent_count": 0
+        }).neq("id", "").execute()
 
     # =========================
-    # CAMPAIGN STATE (FIXED UPSERT)
+    # CAMPAIGN STATE
     # =========================
 
-    def get_campaign_state(self) -> Dict[str, Any]:
+    def get_campaign_state(self):
         res = self.supabase.table("campaign_state").select("*").limit(1).execute()
 
         if res.data:
             return res.data[0]
 
-        default_state = {
+        default = {
             "is_running": False,
             "is_paused": False,
             "skip_today": False,
             "last_run_date": None,
         }
 
-        created = self.supabase.table("campaign_state").insert(
-            default_state
-        ).execute()
-
-        return created.data[0] if created.data else default_state
-
-    def update_campaign_state(self, updates: Dict[str, Any]) -> Dict[str, Any]:
-        state = self.get_campaign_state()
-
-        if not state or "id" not in state:
-            return {}
-
-        res = (
-            self.supabase.table("campaign_state")
-            .update(updates)
-            .eq("id", state["id"])
-            .execute()
-        )
-
-        return res.data[0] if res.data else {}
+        created = self.supabase.table("campaign_state").insert(default).execute()
+        return created.data[0] if created.data else default
 
     # =========================
-    # EMAIL LOGS
+    # EMAIL LOGS (FIXED KEY ISSUE)
     # =========================
 
-    def add_email_log(self, **kwargs) -> Dict[str, Any]:
-        res = self.supabase.table("email_logs").insert(kwargs).execute()
+    def add_email_log(
+        self,
+        lead_email: str,
+        account_id: str,
+        log_type: str,
+        status: str,
+        openai_output: str = "",
+        error_message: str = "",
+        thread_id: str = "",
+        message_id: str = "",
+    ):
+        """
+        FIX: DB column is `type`, NOT `log_type`
+        """
+
+        data = {
+            "lead_email": lead_email,
+            "account_id": account_id,
+            "type": log_type,   # ✅ FIXED HERE
+            "status": status,
+            "openai_output": openai_output,
+            "error_message": error_message,
+            "thread_id": thread_id,
+            "message_id": message_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        res = self.supabase.table("email_logs").insert(data).execute()
         return res.data[0] if res.data else {}
 
-    def get_email_logs(self, limit: int = 100, offset: int = 0):
+    def get_email_logs(self, limit=100, offset=0):
         res = (
             self.supabase.table("email_logs")
             .select("*")
@@ -201,7 +180,7 @@ class Database:
         )
         return res.data or []
 
-    def get_recent_logs(self, hours: int = 24, limit: int = 50):
+    def get_recent_logs(self, hours=24, limit=50):
         cutoff = datetime.utcnow() - timedelta(hours=hours)
 
         res = (
@@ -229,8 +208,5 @@ class Database:
         return res.data[0] if res.data else None
 
 
-# =========================
-# SINGLETON
-# =========================
-
+# Singleton
 db = Database()
