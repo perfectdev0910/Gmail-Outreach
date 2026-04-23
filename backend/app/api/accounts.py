@@ -57,7 +57,6 @@ async def add_account(request: AddAccountRequest) -> Dict[str, Any]:
 
     # Build OAuth credentials - store per-account
     oauth_credentials = {
-        "access_token": request.access_token,
         "refresh_token": request.refresh_token,
         "client_id": request.client_id,
         "client_secret": request.client_secret,
