@@ -20,6 +20,8 @@ export default function AccountsPage() {
     email: "",
     access_token: "",
     refresh_token: "",
+    client_id: "",
+    client_secret: "",
   });
 
   const { data: accounts, isLoading } = useQuery({
@@ -32,7 +34,7 @@ export default function AccountsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       setShowAddModal(false);
-      setNewAccount({ email: "", access_token: "", refresh_token: "" });
+      setNewAccount({ email: "", access_token: "", refresh_token: "", client_id: "", client_secret: "" });
     },
   });
 
@@ -181,6 +183,14 @@ export default function AccountsPage() {
                 <div>
                   <label className="block text-sm font-medium mb-1">Refresh Token</label>
                   <input type="password" value={newAccount.refresh_token} onChange={(e) => setNewAccount({ ...newAccount, refresh_token: e.target.value })} className="w-full px-3 py-2 border rounded-md bg-background" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Client ID (for this account)</label>
+                  <input type="password" value={newAccount.client_id} onChange={(e) => setNewAccount({ ...newAccount, client_id: e.target.value })} className="w-full px-3 py-2 border rounded-md bg-background" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Client Secret (for this account)</label>
+                  <input type="password" value={newAccount.client_secret} onChange={(e) => setNewAccount({ ...newAccount, client_secret: e.target.value })} className="w-full px-3 py-2 border rounded-md bg-background" />
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-6">

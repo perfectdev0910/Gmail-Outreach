@@ -28,6 +28,18 @@ async def lifespan(app: FastAPI):
         
         # Load Gmail accounts into manager
         accounts_list = db.get_gmail_accounts()
+        
+        for account in accounts_list:
+            account_id = str(account.get("id", ""))
+            email = account.get("email", "")
+            oauth_creds = account.get("oauth_credentials", {})
+            
+            if isinstance(oauth_creds, str):
+                import json
+                oauth_creds = json.loads(oauth_creds)
+            
+            gmail_manager.add_account(account_id, email, oauth_creds)
+        
         print(f"✓ Loaded {len(accounts_list)} Gmail accounts")
         
     except Exception as e:

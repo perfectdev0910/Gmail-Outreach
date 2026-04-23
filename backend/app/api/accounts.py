@@ -17,13 +17,8 @@ class AddAccountRequest(BaseModel):
     email: str
     access_token: str
     refresh_token: str
-    token_uri: str = "https://oauth2.googleapis.com/token"
-    expiry: str = ""
-
-
-class UpdateAccountRequest(BaseModel):
-    """Request model for updating an account."""
-    status: str = "active"
+    client_id: str
+    client_secret: str
 
 
 @router.get("")
@@ -56,12 +51,16 @@ async def add_account(request: AddAccountRequest) -> Dict[str, Any]:
         if acc.get("email") == request.email:
             raise HTTPException(status_code=400, detail="Account already exists")
 
-    # Build OAuth credentials
+    # Validate OAuth fields
+    if not all([request.client_id, request.client_secret, request.refresh_token]):
+        raise HTTPException(status_code=400, detail="Missing OAuth credentials")
+
+    # Build OAuth credentials - store per-account
     oauth_credentials = {
         "access_token": request.access_token,
         "refresh_token": request.refresh_token,
-        "token_uri": request.token_uri,
-        "expiry": request.expiry,
+        "client_id": request.client_id,
+        "client_secret": request.client_secret,
     }
 
     # Add to database
