@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
                 import json
                 oauth_creds = json.loads(oauth_creds)
             
-            gmail_manager.add_account(account_id, email, oauth_creds)
+            gmail_manager.add_account(account_id, oauth_creds)
         
         print(f"✓ Loaded {len(accounts_list)} Gmail accounts")
         
