@@ -1,6 +1,7 @@
 """FastAPI main application."""
 
 import os
+import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,26 +18,23 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
+    print("=" * 50)
     print("Starting Gmail Outreach API...")
     
-    # Connect to database
-    db.connect()
-    print("Database connected")
-    
-    # Load Gmail accounts into manager
-    accounts_list = db.get_gmail_accounts()
-    for account in accounts_list:
-        account_id = str(account.get("id", ""))
-        email = account.get("email", "")
-        oauth_creds = account.get("oauth_credentials", {})
+    try:
+        # Connect to database
+        db.connect()
+        print("✓ Database connected")
         
-        if isinstance(oauth_creds, str):
-            import json
-            oauth_creds = json.loads(oauth_creds)
+        # Load Gmail accounts into manager
+        accounts_list = db.get_gmail_accounts()
+        print(f"✓ Loaded {len(accounts_list)} Gmail accounts")
         
-        gmail_manager.add_account(account_id, email, oauth_creds)
+    except Exception as e:
+        print(f"✗ Startup error: {e}")
+        print(traceback.format_exc())
     
-    print(f"Loaded {len(accounts_list)} Gmail accounts")
+    print("=" * 50)
     
     yield
     
@@ -79,13 +77,24 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint for Render."""
     try:
         # Test database connection
-        db.get_campaign_state()
-        return {"status": "healthy", "database": "connected"}
+        state = db.get_campaign_state()
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "campaign": {
+                "is_running": state.get("is_running", False),
+                "is_paused": state.get("is_paused", False),
+            }
+        }
     except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+        return {
+            "status": "degraded",
+            "database": "disconnected",
+            "error": str(e)
+        }
 
 
 if __name__ == "__main__":
