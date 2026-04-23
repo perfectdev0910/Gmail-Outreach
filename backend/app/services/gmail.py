@@ -3,15 +3,11 @@
 import base64
 import json
 import random
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-
-import google.auth
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import Resource, build
-from googleapiclient.errors import HttpError
 
 from app.core.config import get_settings
 
@@ -19,20 +15,18 @@ settings = get_settings()
 
 
 class GmailService:
-    """Service for Gmail API operations."""
+    """Service for Gmail API operations using HTTP requests directly."""
 
-    def __init__(self, credentials: Optional[Credentials] = None):
-        self._credentials = credentials
-        self._service: Optional[Resource] = None
+    def __init__(self, access_token: str):
+        self._access_token = access_token
+        self._base_url = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-    @property
-    def service(self) -> Resource:
-        """Get or create Gmail service."""
-        if self._service is None:
-            if self._credentials is None:
-                self._credentials, _ = google.auth.default()
-            self._service = build("gmail", "v1", credentials=self._credentials)
-        return self._service
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers with authorization."""
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json",
+        }
 
     def create_message(
         self,
@@ -84,7 +78,7 @@ class GmailService:
         thread_id: str = "",
         message_id: str = "",
     ) -> Dict[str, Any]:
-        """Send an email via Gmail API.
+        """Send an email via Gmail API REST.
         
         Args:
             sender: Sender email address
@@ -107,28 +101,28 @@ class GmailService:
                 message_id=message_id,
             )
 
-            result = (
-                self.service.users()
-                .messages()
-                .send(userId="me", body=message)
-                .execute()
+            response = requests.post(
+                f"{self._base_url}/messages/send",
+                headers=self._get_headers(),
+                json=message,
             )
 
-            return {
-                "success": True,
-                "message_id": result.get("id", ""),
-                "thread_id": result.get("threadId", ""),
-                "error": "",
-            }
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "success": True,
+                    "message_id": result.get("id", ""),
+                    "thread_id": result.get("threadId", ""),
+                    "error": "",
+                }
+            else:
+                return {
+                    "success": False,
+                    "message_id": "",
+                    "thread_id": "",
+                    "error": f"HTTP {response.status_code}: {response.text}",
+                }
 
-        except HttpError as error:
-            print(f"Gmail API error: {error}")
-            return {
-                "success": False,
-                "message_id": "",
-                "thread_id": "",
-                "error": str(error),
-            }
         except Exception as error:
             print(f"Unexpected error: {error}")
             return {
@@ -141,25 +135,15 @@ class GmailService:
     def get_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
         """Get thread details."""
         try:
-            result = (
-                self.service.users()
-                .threads()
-                .get(userId="me", id=thread_id)
-                .execute()
+            response = requests.get(
+                f"{self._base_url}/threads/{thread_id}",
+                headers=self._get_headers(),
             )
-            return result
-        except HttpError:
+            if response.status_code == 200:
+                return response.json()
             return None
-
-    def get_messages_in_thread(
-        self,
-        thread_id: str,
-    ) -> List[Dict[str, Any]]:
-        """Get all messages in a thread."""
-        thread = self.get_thread(thread_id)
-        if thread:
-            return thread.get("messages", [])
-        return []
+        except Exception:
+            return None
 
     def list_messages(
         self,
@@ -168,14 +152,15 @@ class GmailService:
     ) -> List[Dict[str, Any]]:
         """List recent messages."""
         try:
-            results = (
-                self.service.users()
-                .messages()
-                .list(userId="me", maxResults=max_results, q=query)
-                .execute()
+            response = requests.get(
+                f"{self._base_url}/messages",
+                headers=self._get_headers(),
+                params={"maxResults": max_results, "q": query},
             )
-            return results.get("messages", [])
-        except HttpError:
+            if response.status_code == 200:
+                return response.json().get("messages", [])
+            return []
+        except Exception:
             return []
 
 
@@ -183,7 +168,6 @@ class GmailAccountManager:
     """Manager for multi-account Gmail operations."""
 
     def __init__(self):
-        self._accounts: Dict[str, Credentials] = {}
         self._services: Dict[str, GmailService] = {}
 
     def add_account(
@@ -200,20 +184,12 @@ class GmailAccountManager:
             oauth_credentials: OAuth2 tokens dict with 'access_token', 'refresh_token', etc.
         """
         try:
-            credentials = Credentials(
-                token=oauth_credentials.get("access_token", ""),
-                refresh_token=oauth_credentials.get("refresh_token", ""),
-                token_uri=oauth_credentials.get("token_uri", "https://oauth2.googleapis.com/token"),
-                client_id=settings.google_client_id,
-                client_secret=settings.google_client_secret,
-                scopes=[
-                    "https://www.googleapis.com/auth/gmail.send",
-                    "https://www.googleapis.com/auth/gmail.readonly",
-                ],
-            )
+            access_token = oauth_credentials.get("access_token", "")
+            if not access_token:
+                print(f"No access token for account {account_id}")
+                return False
 
-            self._accounts[account_id] = credentials
-            self._services[account_id] = GmailService(credentials)
+            self._services[account_id] = GmailService(access_token)
             return True
 
         except Exception as error:
@@ -281,13 +257,10 @@ class GmailAccountManager:
 
     def remove_account(self, account_id: str) -> bool:
         """Remove an account from the manager."""
-        if account_id in self._accounts:
-            del self._accounts[account_id]
         if account_id in self._services:
             del self._services[account_id]
         return True
 
 
 # Global instances
-gmail_service = GmailService()
 gmail_manager = GmailAccountManager()
