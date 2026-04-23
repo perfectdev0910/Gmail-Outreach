@@ -383,7 +383,7 @@ class CampaignWorker:
         send_result = gmail_manager.send_with_thread(
             account_id=str(account.get("id", "")),
             email=lead_email,
-            oauth_credentials=oauth_creds,
+            oauth=oauth_creds,
             sender=account.get("email", ""),
             subject=subject,
             body=body,
